@@ -12,6 +12,7 @@ devenv.local.nix
 bash_tool
 chat
 chat_verbose
+code_search_tool
 edit_tool
 list_files
 read
