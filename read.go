@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/invopop/jsonschema"
 )
 
@@ -27,9 +26,13 @@ func main() {
 		log.SetPrefix("")
 	}
 
-	client := anthropic.NewClient()
+	provider, err := NewProviderFromEnv()
+	if err != nil {
+		fmt.Printf("Error initializing provider: %s\n", err.Error())
+		os.Exit(1)
+	}
 	if *verbose {
-		log.Println("Anthropic client initialized")
+		log.Println("Provider initialized")
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -44,21 +47,21 @@ func main() {
 	if *verbose {
 		log.Printf("Initialized %d tools", len(tools))
 	}
-	agent := NewAgent(&client, getUserMessage, tools, *verbose)
-	err := agent.Run(context.TODO())
+	agent := NewAgent(provider, getUserMessage, tools, *verbose)
+	err = agent.Run(context.TODO())
 	if err != nil {
 		fmt.Printf("Error: %s\n", err.Error())
 	}
 }
 
 func NewAgent(
-	client *anthropic.Client,
+	provider Provider,
 	getUserMessage func() (string, bool),
 	tools []ToolDefinition,
 	verbose bool,
 ) *Agent {
 	return &Agent{
-		client:         client,
+		provider:       provider,
 		getUserMessage: getUserMessage,
 		tools:          tools,
 		verbose:        verbose,
@@ -66,19 +69,19 @@ func NewAgent(
 }
 
 type Agent struct {
-	client         *anthropic.Client
+	provider       Provider
 	getUserMessage func() (string, bool)
 	tools          []ToolDefinition
 	verbose        bool
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	conversation := []anthropic.MessageParam{}
+	conversation := []Message{}
 
 	if a.verbose {
 		log.Println("Starting chat session with tools enabled")
 	}
-	fmt.Println("Chat with Claude (use 'ctrl-c' to quit)")
+	fmt.Println("Chat with Assistant (use 'ctrl-c' to quit)")
 
 	for {
 		fmt.Print("\u001b[94mYou\u001b[0m: ")
@@ -102,54 +105,63 @@ func (a *Agent) Run(ctx context.Context) error {
 			log.Printf("User input received: %q", userInput)
 		}
 
-		userMessage := anthropic.NewUserMessage(anthropic.NewTextBlock(userInput))
+		userMessage := Message{
+			Role: "user",
+			Content: []ContentBlock{
+				{Type: "text", Text: userInput},
+			},
+		}
 		conversation = append(conversation, userMessage)
 
 		if a.verbose {
-			log.Printf("Sending message to Claude, conversation length: %d", len(conversation))
+			log.Printf("Sending message, conversation length: %d", len(conversation))
 		}
 
-		message, err := a.runInference(ctx, conversation)
+		response, err := a.runInference(ctx, conversation)
 		if err != nil {
 			if a.verbose {
 				log.Printf("Error during inference: %v", err)
 			}
 			return err
 		}
-		conversation = append(conversation, message.ToParam())
+		
+		assistantMessage := Message{
+			Role:    "assistant",
+			Content: response.Content,
+		}
+		conversation = append(conversation, assistantMessage)
 
-		// Keep processing until Claude stops using tools
+		// Keep processing until assistant stops using tools
 		for {
 			// Collect all tool uses and their results
-			var toolResults []anthropic.ContentBlockParamUnion
+			var toolResults []ContentBlock
 			var hasToolUse bool
 
 			if a.verbose {
-				log.Printf("Processing %d content blocks from Claude", len(message.Content))
+				log.Printf("Processing %d content blocks", len(response.Content))
 			}
 
-			for _, content := range message.Content {
+			for _, content := range response.Content {
 				switch content.Type {
 				case "text":
-					fmt.Printf("\u001b[93mClaude\u001b[0m: %s\n", content.Text)
+					fmt.Printf("\u001b[93mAssistant\u001b[0m: %s\n", content.Text)
 				case "tool_use":
 					hasToolUse = true
-					toolUse := content.AsToolUse()
 					if a.verbose {
-						log.Printf("Tool use detected: %s with input: %s", toolUse.Name, string(toolUse.Input))
+						log.Printf("Tool use detected: %s with input: %s", content.ToolName, string(content.ToolInput))
 					}
-					fmt.Printf("\u001b[96mtool\u001b[0m: %s(%s)\n", toolUse.Name, string(toolUse.Input))
+					fmt.Printf("\u001b[96mtool\u001b[0m: %s(%s)\n", content.ToolName, string(content.ToolInput))
 
 					// Find and execute the tool
 					var toolResult string
 					var toolError error
 					var toolFound bool
 					for _, tool := range a.tools {
-						if tool.Name == toolUse.Name {
+						if tool.Name == content.ToolName {
 							if a.verbose {
 								log.Printf("Executing tool: %s", tool.Name)
 							}
-							toolResult, toolError = tool.Function(toolUse.Input)
+							toolResult, toolError = tool.Function(content.ToolInput)
 							fmt.Printf("\u001b[92mresult\u001b[0m: %s\n", toolResult)
 							if toolError != nil {
 								fmt.Printf("\u001b[91merror\u001b[0m: %s\n", toolError.Error())
@@ -167,15 +179,25 @@ func (a *Agent) Run(ctx context.Context) error {
 					}
 
 					if !toolFound {
-						toolError = fmt.Errorf("tool '%s' not found", toolUse.Name)
+						toolError = fmt.Errorf("tool '%s' not found", content.ToolName)
 						fmt.Printf("\u001b[91merror\u001b[0m: %s\n", toolError.Error())
 					}
 
 					// Add tool result to collection
 					if toolError != nil {
-						toolResults = append(toolResults, anthropic.NewToolResultBlock(toolUse.ID, toolError.Error(), true))
+						toolResults = append(toolResults, ContentBlock{
+							Type:            "tool_result",
+							ToolResultID:    content.ToolUseID,
+							ToolResultValue: toolError.Error(),
+							IsError:         true,
+						})
 					} else {
-						toolResults = append(toolResults, anthropic.NewToolResultBlock(toolUse.ID, toolResult, false))
+						toolResults = append(toolResults, ContentBlock{
+							Type:            "tool_result",
+							ToolResultID:    content.ToolUseID,
+							ToolResultValue: toolResult,
+							IsError:         false,
+						})
 					}
 				}
 			}
@@ -185,25 +207,33 @@ func (a *Agent) Run(ctx context.Context) error {
 				break
 			}
 
-			// Send all tool results back and get Claude's response
+			// Send all tool results back and get assistant's response
 			if a.verbose {
-				log.Printf("Sending %d tool results back to Claude", len(toolResults))
+				log.Printf("Sending %d tool results back", len(toolResults))
 			}
-			toolResultMessage := anthropic.NewUserMessage(toolResults...)
+			toolResultMessage := Message{
+				Role:    "user",
+				Content: toolResults,
+			}
 			conversation = append(conversation, toolResultMessage)
 
-			// Get Claude's response after tool execution
-			message, err = a.runInference(ctx, conversation)
+			// Get assistant's response after tool execution
+			response, err = a.runInference(ctx, conversation)
 			if err != nil {
 				if a.verbose {
 					log.Printf("Error during followup inference: %v", err)
 				}
 				return err
 			}
-			conversation = append(conversation, message.ToParam())
+			
+			assistantMessage := Message{
+				Role:    "assistant",
+				Content: response.Content,
+			}
+			conversation = append(conversation, assistantMessage)
 
 			if a.verbose {
-				log.Printf("Received followup response with %d content blocks", len(message.Content))
+				log.Printf("Received followup response with %d content blocks", len(response.Content))
 			}
 
 			// Continue loop to process the new message
@@ -216,28 +246,28 @@ func (a *Agent) Run(ctx context.Context) error {
 	return nil
 }
 
-func (a *Agent) runInference(ctx context.Context, conversation []anthropic.MessageParam) (*anthropic.Message, error) {
-	anthropicTools := []anthropic.ToolUnionParam{}
+func (a *Agent) runInference(ctx context.Context, conversation []Message) (*ChatCompletionResponse, error) {
+	// Convert tool definitions to generic Tool format
+	tools := make([]Tool, 0, len(a.tools))
 	for _, tool := range a.tools {
-		anthropicTools = append(anthropicTools, anthropic.ToolUnionParam{
-			OfTool: &anthropic.ToolParam{
-				Name:        tool.Name,
-				Description: anthropic.String(tool.Description),
-				InputSchema: tool.InputSchema,
-			},
+		tools = append(tools, Tool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
 		})
 	}
 
 	if a.verbose {
-		log.Printf("Making API call to Claude with model: %s and %d tools", anthropic.ModelClaude3_7SonnetLatest, len(anthropicTools))
+		log.Printf("Making API call with %d tools", len(tools))
 	}
 
-	message, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaude3_7SonnetLatest,
-		MaxTokens: int64(1024),
+	request := ChatCompletionRequest{
+		MaxTokens: 1024,
 		Messages:  conversation,
-		Tools:     anthropicTools,
-	})
+		Tools:     tools,
+	}
+
+	response, err := a.provider.CreateChatCompletion(ctx, request)
 
 	if a.verbose {
 		if err != nil {
@@ -247,13 +277,13 @@ func (a *Agent) runInference(ctx context.Context, conversation []anthropic.Messa
 		}
 	}
 
-	return message, err
+	return response, err
 }
 
 type ToolDefinition struct {
-	Name        string                         `json:"name"`
-	Description string                         `json:"description"`
-	InputSchema anthropic.ToolInputSchemaParam `json:"input_schema"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema ToolInputSchema `json:"input_schema"`
 	Function    func(input json.RawMessage) (string, error)
 }
 
@@ -287,7 +317,7 @@ func ReadFile(input json.RawMessage) (string, error) {
 	return string(content), nil
 }
 
-func GenerateSchema[T any]() anthropic.ToolInputSchemaParam {
+func GenerateSchema[T any]() ToolInputSchema {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
 		DoNotReference:            true,
@@ -296,7 +326,16 @@ func GenerateSchema[T any]() anthropic.ToolInputSchemaParam {
 
 	schema := reflector.Reflect(v)
 
-	return anthropic.ToolInputSchemaParam{
-		Properties: schema.Properties,
+	// Convert OrderedMap to regular map
+	properties := make(map[string]interface{})
+	if schema.Properties != nil {
+		for pair := schema.Properties.Oldest(); pair != nil; pair = pair.Next() {
+			properties[pair.Key] = pair.Value
+		}
+	}
+
+	return ToolInputSchema{
+		Type:       "object",
+		Properties: properties,
 	}
 }
