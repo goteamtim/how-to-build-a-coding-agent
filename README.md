@@ -12,11 +12,11 @@ You don’t need to be an AI expert. Just follow along and build step-by-step!
 
 By the end of this workshop, you’ll understand how to:
 
-- ✅ Connect to the Anthropic Claude API
-- ✅ Build a simple AI chatbot
+- ✅ Connect to AI providers (Anthropic Claude, OpenAI, Ollama, LM Studio, etc.)
+- ✅ Build a provider-agnostic AI chatbot
 - ✅ Add tools like reading files, editing code, and running commands
 - ✅ Handle tool requests and errors
-- ✅ Build an agent that gets smarter with each step
+- ✅ Build an agent that works with multiple LLM providers
 
 ---
 
@@ -26,7 +26,7 @@ You’ll build 6 versions of a coding assistant.
 
 Each version adds more features:
 
-1. **Basic Chat** — talk to Claude
+1. **Basic Chat** — talk to your AI assistant
 2. **File Reader** — read code files
 3. **File Explorer** — list files in folders
 4. **Command Runner** — run shell commands
@@ -70,18 +70,21 @@ At the end, you’ll end up with a powerful local developer assistant!
 Each agent works like this:
 
 1. Waits for your input
-2. Sends it to Claude
-3. Claude may respond directly or ask to use a tool
+2. Sends it to the AI provider
+3. The AI may respond directly or ask to use a tool
 4. The agent runs the tool (e.g., read a file)
-5. Sends the result back to Claude
-6. Claude gives you the final answer
+5. Sends the result back to the AI
+6. The AI gives you the final answer
 
 We call this the **event loop** — it's like the agent's heartbeat.
 
 ```mermaid
 graph TB
     subgraph "Agent Architecture"
-        A[Agent] --> B[Anthropic Client]
+        A[Agent] --> B[Provider Interface]
+        B --> B1[Anthropic Provider]
+        B --> B2[OpenAI Provider]
+        B2 -.-> B3[Ollama/LM Studio]
         A --> C[Tool Registry]
         A --> D[getUserMessage Function]
         A --> E[Verbose Logging]
@@ -93,12 +96,12 @@ graph TB
         H -->|Yes| G
         H -->|No| I[Add to Conversation]
         I --> J[runInference]
-        J --> K[Claude Response]
+        J --> K[LLM Response]
         K --> L{Tool Use?}
         L -->|No| M[Display Text]
         L -->|Yes| N[Execute Tools]
         N --> O[Collect Results]
-        O --> P[Send Results to Claude]
+        O --> P[Send Results to LLM]
         P --> J
         M --> G
     end
@@ -119,7 +122,10 @@ graph TB
 ### ✅ Prerequisites
 
 * Go 1.24.2+ or [devenv](https://devenv.sh/) (recommended for easy setup)
-* An [Anthropic API Key](https://www.anthropic.com/product/claude)
+* An API key from one of the supported providers:
+  * [Anthropic Claude](https://www.anthropic.com/product/claude) (default)
+  * [OpenAI](https://platform.openai.com/)
+  * Or a local model server like [Ollama](https://ollama.ai/) or [LM Studio](https://lmstudio.ai/)
 
 ### 🔧 Set Up Your Environment
 
@@ -136,10 +142,41 @@ devenv shell  # Loads everything you need
 go mod tidy
 ```
 
-### 🔐 Add Your API Key
+### 🔐 Configure Your AI Provider
+
+The agents support multiple AI providers. By default, they use Anthropic Claude.
+
+**Option 1: Using Anthropic Claude (default)**
 
 ```bash
 export ANTHROPIC_API_KEY="your-api-key-here"
+```
+
+**Option 2: Using OpenAI**
+
+```bash
+export PROVIDER="openai"
+export OPENAI_API_KEY="your-api-key-here"
+# Optional: specify a different model
+export OPENAI_MODEL="gpt-4"
+```
+
+**Option 3: Using Ollama (local)**
+
+```bash
+export PROVIDER="openai"
+export OPENAI_BASE_URL="http://localhost:11434/v1"
+export OPENAI_MODEL="llama2"  # or any model you have installed
+# No API key needed for local Ollama
+```
+
+**Option 4: Using LM Studio (local)**
+
+```bash
+export PROVIDER="openai"
+export OPENAI_BASE_URL="http://localhost:1234/v1"
+export OPENAI_MODEL="local-model"  # check LM Studio for the exact model name
+# No API key needed for local LM Studio
 ```
 
 ---
@@ -148,7 +185,7 @@ export ANTHROPIC_API_KEY="your-api-key-here"
 
 ### 1. `chat.go` — Basic Chat
 
-A simple chatbot that talks to Claude.
+A simple chatbot that talks to your chosen AI provider.
 
 ```bash
 go run chat.go
@@ -163,7 +200,7 @@ go run chat.go
 
 ### 2. `read.go` — Read Files
 
-Now Claude can read files from your computer.
+Now your AI assistant can read files from your computer.
 
 ```bash
 go run read.go
@@ -175,7 +212,7 @@ go run read.go
 
 ### 3. `list_files.go` — Explore Folders
 
-Lets Claude look around your directory.
+Lets your AI assistant look around your directory.
 
 ```bash
 go run list_files.go
@@ -188,7 +225,7 @@ go run list_files.go
 
 ### 4. `bash_tool.go` — Run Shell Commands
 
-Allows Claude to run safe terminal commands.
+Allows your AI assistant to run safe terminal commands.
 
 ```bash
 go run bash_tool.go
@@ -201,7 +238,7 @@ go run bash_tool.go
 
 ### 5. `edit_tool.go` — Edit Files
 
-Claude can now **modify code**, create files, and make changes.
+Your AI assistant can now **modify code**, create files, and make changes.
 
 ```bash
 go run edit_tool.go
@@ -225,6 +262,47 @@ go run code_search_tool.go
 
 ---
 
+## 🔌 Provider Support
+
+This workshop supports multiple AI providers through a clean interface abstraction:
+
+### Supported Providers
+
+1. **Anthropic Claude** (default)
+   - Full tool/function calling support
+   - Best for complex reasoning tasks
+   - Requires: `ANTHROPIC_API_KEY`
+
+2. **OpenAI**
+   - Compatible with GPT-4, GPT-3.5, and other OpenAI models
+   - Full tool/function calling support
+   - Requires: `PROVIDER=openai`, `OPENAI_API_KEY`
+
+3. **Ollama** (local)
+   - Run models locally on your machine
+   - No API key needed
+   - Supports tool calling with compatible models (llama2, mistral, etc.)
+   - Requires: `PROVIDER=openai`, `OPENAI_BASE_URL=http://localhost:11434/v1`
+
+4. **LM Studio** (local)
+   - Another option for running models locally
+   - No API key needed
+   - Check model compatibility for tool calling
+   - Requires: `PROVIDER=openai`, `OPENAI_BASE_URL=http://localhost:1234/v1`
+
+### How It Works
+
+The codebase uses a **Provider Interface** that abstracts away provider-specific details:
+
+- `Provider` interface defines the contract all providers must implement
+- `AnthropicProvider` wraps the Anthropic SDK
+- `OpenAIProvider` uses the OpenAI-compatible API format (works with OpenAI, Ollama, LM Studio, etc.)
+- Agents interact only with the `Provider` interface, making them provider-agnostic
+
+This means you can switch providers by just changing environment variables!
+
+---
+
 ## 🧪 Sample Files (Already Included)
 
 1. `fizzbuzz.js`: for file reading and editing
@@ -235,10 +313,18 @@ go run code_search_tool.go
 
 ## 🐞 Troubleshooting
 
+
 **API key not working?**
 
-* Make sure it’s exported: `echo $ANTHROPIC_API_KEY`
-* Check your quota on [Anthropic’s dashboard](https://www.anthropic.com)
+* Make sure it's exported: `echo $ANTHROPIC_API_KEY` or `echo $OPENAI_API_KEY`
+* For Anthropic: Check your quota on [Anthropic's dashboard](https://www.anthropic.com)
+* For OpenAI: Check your quota on [OpenAI's platform](https://platform.openai.com)
+
+**Using Ollama or LM Studio?**
+
+* Make sure the server is running (check `http://localhost:11434` for Ollama or `http://localhost:1234` for LM Studio)
+* Verify the model name matches what's installed: `ollama list` (for Ollama)
+* Set `PROVIDER=openai` and `OPENAI_BASE_URL` to point to your local server
 
 **Go errors?**
 
@@ -311,11 +397,11 @@ hello          # Greeting script
 
 Once you complete the workshop, try building:
 
-* Custom tools (e.g., API caller, web scraper)
+* Custom tools (e.g., API caller, web scraper, database query)
 * Tool chains (run tools in a sequence)
 * Memory features (remember things across sessions)
 * A web UI for your agent
-* Integration with other AI models
+* Integration with additional AI providers (Azure OpenAI, Google Vertex AI, etc.)
 
 ---
 
@@ -323,10 +409,10 @@ Once you complete the workshop, try building:
 
 This workshop helps you:
 
-* Understand agent architecture
-* Learn to build smart assistants
+* Understand provider-agnostic agent architecture
+* Learn to build smart assistants that work with any LLM
 * Grow capabilities step-by-step
-* Practice using Claude and Go together
+* Practice using multiple AI providers with Go
 
 ---
 
