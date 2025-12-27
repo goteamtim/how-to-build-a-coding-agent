@@ -128,7 +128,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		
+
 		assistantMessage := Message{
 			Role:    "assistant",
 			Content: response.Content,
@@ -229,7 +229,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				}
 				return err
 			}
-			
+
 			assistantMessage := Message{
 				Role:    "assistant",
 				Content: response.Content,

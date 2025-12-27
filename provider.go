@@ -40,10 +40,10 @@ type ContentBlock struct {
 	Text string
 
 	// For tool_use blocks
-	ToolUseID   string
-	ToolName    string
-	ToolInput   json.RawMessage
-	
+	ToolUseID string
+	ToolName  string
+	ToolInput json.RawMessage
+
 	// For tool_result blocks
 	ToolResultID    string
 	ToolResultValue string

@@ -56,7 +56,7 @@ func (p *AnthropicProvider) CreateChatCompletion(ctx context.Context, request Ch
 		for key, value := range tool.InputSchema.Properties {
 			properties.Set(key, value)
 		}
-		
+
 		inputSchema := anthropic.ToolInputSchemaParam{
 			Properties: properties,
 		}
@@ -98,10 +98,10 @@ func (p *AnthropicProvider) CreateChatCompletion(ctx context.Context, request Ch
 		case "tool_use":
 			toolUse := content.AsToolUse()
 			contentBlocks = append(contentBlocks, ContentBlock{
-				Type:        "tool_use",
-				ToolUseID:   toolUse.ID,
-				ToolName:    toolUse.Name,
-				ToolInput:   toolUse.Input,
+				Type:      "tool_use",
+				ToolUseID: toolUse.ID,
+				ToolName:  toolUse.Name,
+				ToolInput: toolUse.Input,
 			})
 		}
 	}

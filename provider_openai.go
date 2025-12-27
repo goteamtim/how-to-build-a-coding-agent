@@ -47,18 +47,18 @@ func NewOpenAIProvider(baseURL, apiKey, model string) *OpenAIProvider {
 
 // OpenAI API request/response structures
 type openAIRequest struct {
-	Model      string                   `json:"model"`
-	Messages   []openAIMessage          `json:"messages"`
-	MaxTokens  int                      `json:"max_tokens,omitempty"`
-	Tools      []openAITool             `json:"tools,omitempty"`
-	ToolChoice interface{}              `json:"tool_choice,omitempty"`
+	Model      string          `json:"model"`
+	Messages   []openAIMessage `json:"messages"`
+	MaxTokens  int             `json:"max_tokens,omitempty"`
+	Tools      []openAITool    `json:"tools,omitempty"`
+	ToolChoice interface{}     `json:"tool_choice,omitempty"`
 }
 
 type openAIMessage struct {
-	Role       string                 `json:"role"`
-	Content    interface{}            `json:"content,omitempty"` // string or []contentPart
-	ToolCalls  []openAIToolCall       `json:"tool_calls,omitempty"`
-	ToolCallID string                 `json:"tool_call_id,omitempty"`
+	Role       string           `json:"role"`
+	Content    interface{}      `json:"content,omitempty"` // string or []contentPart
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
 
 type openAIContentPart struct {
@@ -67,9 +67,9 @@ type openAIContentPart struct {
 }
 
 type openAIToolCall struct {
-	ID       string              `json:"id"`
-	Type     string              `json:"type"`
-	Function openAIFunctionCall  `json:"function"`
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Function openAIFunctionCall `json:"function"`
 }
 
 type openAIFunctionCall struct {
@@ -101,7 +101,7 @@ type openAIChoice struct {
 func (p *OpenAIProvider) CreateChatCompletion(ctx context.Context, request ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	// Convert our generic messages to OpenAI format
 	messages := make([]openAIMessage, 0)
-	
+
 	for _, msg := range request.Messages {
 		oaiMsg := openAIMessage{
 			Role: msg.Role,
@@ -110,7 +110,7 @@ func (p *OpenAIProvider) CreateChatCompletion(ctx context.Context, request ChatC
 		// Check if this message contains tool calls or tool results
 		var hasToolUse, hasToolResult bool
 		var toolCalls []openAIToolCall
-		
+
 		for _, content := range msg.Content {
 			switch content.Type {
 			case "text":
@@ -247,10 +247,10 @@ func (p *OpenAIProvider) CreateChatCompletion(ctx context.Context, request ChatC
 	// Add tool calls if present
 	for _, toolCall := range choice.Message.ToolCalls {
 		contentBlocks = append(contentBlocks, ContentBlock{
-			Type:        "tool_use",
-			ToolUseID:   toolCall.ID,
-			ToolName:    toolCall.Function.Name,
-			ToolInput:   json.RawMessage(toolCall.Function.Arguments),
+			Type:      "tool_use",
+			ToolUseID: toolCall.ID,
+			ToolName:  toolCall.Function.Name,
+			ToolInput: json.RawMessage(toolCall.Function.Arguments),
 		})
 	}
 

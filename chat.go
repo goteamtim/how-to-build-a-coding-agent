@@ -100,7 +100,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		conversation = append(conversation, userMessage)
 
 		if a.verbose {
-			log.Printf("Sending message to Claude, conversation length: %d", len(conversation))
+			log.Printf("Sending message, conversation length: %d", len(conversation))
 		}
 
 		response, err := a.runInference(ctx, conversation)
@@ -110,7 +110,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		
+
 		assistantMessage := Message{
 			Role:    "assistant",
 			Content: response.Content,
