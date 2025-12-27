@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-
-	"github.com/anthropics/anthropic-sdk-go"
 )
 
 func main() {
@@ -25,9 +23,13 @@ func main() {
 		log.SetPrefix("")
 	}
 
-	client := anthropic.NewClient()
+	provider, err := NewProviderFromEnv()
+	if err != nil {
+		fmt.Printf("Error initializing provider: %s\n", err.Error())
+		os.Exit(1)
+	}
 	if *verbose {
-		log.Println("Anthropic client initialized")
+		log.Println("Provider initialized")
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -38,29 +40,29 @@ func main() {
 		return scanner.Text(), true
 	}
 
-	agent := NewAgent(&client, getUserMessage, *verbose)
-	err := agent.Run(context.TODO())
+	agent := NewAgent(provider, getUserMessage, *verbose)
+	err = agent.Run(context.TODO())
 	if err != nil {
 		fmt.Printf("Error: %s\n", err.Error())
 	}
 }
 
-func NewAgent(client *anthropic.Client, getUserMessage func() (string, bool), verbose bool) *Agent {
+func NewAgent(provider Provider, getUserMessage func() (string, bool), verbose bool) *Agent {
 	return &Agent{
-		client:         client,
+		provider:       provider,
 		getUserMessage: getUserMessage,
 		verbose:        verbose,
 	}
 }
 
 type Agent struct {
-	client         *anthropic.Client
+	provider       Provider
 	getUserMessage func() (string, bool)
 	verbose        bool
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	conversation := []anthropic.MessageParam{}
+	conversation := []Message{}
 
 	if a.verbose {
 		log.Println("Starting chat session")
@@ -89,30 +91,40 @@ func (a *Agent) Run(ctx context.Context) error {
 			log.Printf("User input received: %q", userInput)
 		}
 
-		userMessage := anthropic.NewUserMessage(anthropic.NewTextBlock(userInput))
+		userMessage := Message{
+			Role: "user",
+			Content: []ContentBlock{
+				{Type: "text", Text: userInput},
+			},
+		}
 		conversation = append(conversation, userMessage)
 
 		if a.verbose {
-			log.Printf("Sending message to Claude, conversation length: %d", len(conversation))
+			log.Printf("Sending message, conversation length: %d", len(conversation))
 		}
 
-		message, err := a.runInference(ctx, conversation)
+		response, err := a.runInference(ctx, conversation)
 		if err != nil {
 			if a.verbose {
 				log.Printf("Error during inference: %v", err)
 			}
 			return err
 		}
-		conversation = append(conversation, message.ToParam())
+
+		assistantMessage := Message{
+			Role:    "assistant",
+			Content: response.Content,
+		}
+		conversation = append(conversation, assistantMessage)
 
 		if a.verbose {
-			log.Printf("Received response from Claude with %d content blocks", len(message.Content))
+			log.Printf("Received response with %d content blocks", len(response.Content))
 		}
 
-		for _, content := range message.Content {
+		for _, content := range response.Content {
 			switch content.Type {
 			case "text":
-				fmt.Printf("\u001b[93mClaude\u001b[0m: %s\n", content.Text)
+				fmt.Printf("\u001b[93mAssistant\u001b[0m: %s\n", content.Text)
 			}
 		}
 	}
@@ -123,16 +135,17 @@ func (a *Agent) Run(ctx context.Context) error {
 	return nil
 }
 
-func (a *Agent) runInference(ctx context.Context, conversation []anthropic.MessageParam) (*anthropic.Message, error) {
+func (a *Agent) runInference(ctx context.Context, conversation []Message) (*ChatCompletionResponse, error) {
 	if a.verbose {
-		log.Printf("Making API call to Claude with model: %s", anthropic.ModelClaude3_7SonnetLatest)
+		log.Printf("Making API call with %d messages", len(conversation))
 	}
 
-	message, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaude3_7SonnetLatest,
-		MaxTokens: int64(1024),
+	request := ChatCompletionRequest{
+		MaxTokens: 1024,
 		Messages:  conversation,
-	})
+	}
+
+	response, err := a.provider.CreateChatCompletion(ctx, request)
 
 	if a.verbose {
 		if err != nil {
@@ -142,5 +155,5 @@ func (a *Agent) runInference(ctx context.Context, conversation []anthropic.Messa
 		}
 	}
 
-	return message, err
+	return response, err
 }
